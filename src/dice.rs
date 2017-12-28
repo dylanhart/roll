@@ -1,3 +1,35 @@
+#![deny(missing_docs)]
+
+//! A library to parse dice expressions and roll dice.
+//!
+//! ## Usage
+//!
+//! Create expressions in code:
+//!
+//! ```rust
+//! # use dice::*;
+//! let dice = 3 * D6 + 4;
+//! assert_eq!(dice.to_string(), "3d6 + 4")
+//! ```
+//!
+//! Parse dice expressions from strings:
+//!
+//! ```rust
+//! # use dice::*;
+//! let dice = Dice::parse("d20 + 7").unwrap();
+//! assert_eq!(dice, D20 + 7);
+//! ```
+//!
+//! Compute dice rolls:
+//!
+//! ```rust
+//! # use dice::*;
+//! let dice = D20 + 12;
+//! let roll = dice.roll();
+//! let value = roll.value();
+//! println!("{} = {} = {}", dice, roll, value);
+//! ```
+
 #[macro_use] extern crate chomp;
 extern crate itertools;
 extern crate rand;
@@ -8,66 +40,123 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Deref, Sub, Mul};
 use std::str::{FromStr};
 
+/// A four sided die
 pub const D4: Dice = Dice::Die(4);
+/// A six sided die
 pub const D6: Dice = Dice::Die(6);
+/// A eight sided die
 pub const D8: Dice = Dice::Die(8);
+/// A ten sided die
 pub const D10: Dice = Dice::Die(10);
+/// A twelve sided die
 pub const D12: Dice = Dice::Die(12);
+/// A twenty sided die
 pub const D20: Dice = Dice::Die(20);
 
+/// A set of dice that can be rolled
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Dice {
+    /// a constant value
     Constant(u32),
+    /// an `n` sided die
     Die(u32),
+    /// a repeated set of dice with an optional modifier
     Repeat(u32, Box<Dice>, Option<Modifier>),
+    /// the sum of two sets of dice
     Sum(Box<Dice>, Box<Dice>),
+    /// the difference of two sets of dice
     Difference(Box<Dice>, Box<Dice>),
 }
 
+/// Modifiers for repeated dice
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Modifier {
+    /// keep the `n` highest valued dice
     KeepHighest(u32),
+    /// keep the `n` lowest valued dice
     KeepLowest(u32),
 }
 
+/// An error encountered while parsing a dice expression
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ParseError {
+    /// The given input is invalid
+    InvalidInput,
+}
+
+/// The result of rolling dice
+///
+/// The structure of a `Roll` will match the structure of the `Dice` that rolled it and will contain
+/// the generated values.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Roll {
+    /// a constant value
     Constant(u32),
+    /// a result of a die roll
     Die(i64),
+    /// a set of rolls with modified statuses
     Repeat(Vec<ModifiedRoll>),
+    /// a sum of two rolls
     Sum(Box<Roll>, Box<Roll>),
+    /// a difference of two rolls
     Difference(Box<Roll>, Box<Roll>),
 }
 
+/// A modified `Roll` with a `RollStatus`
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ModifiedRoll {
+    /// The status of this `Roll`
     status: RollStatus,
+    /// The modified `Roll`
     roll: Roll,
 }
 
+/// A status for a `ModifiedRoll`
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RollStatus {
+    /// The roll is kept as normal
     Kept,
+    /// The roll is dropped and is not calculated towards the final value
     Dropped,
 }
 
 impl Dice {
+    /// Create a dice from the given expression
+    pub fn parse(expression: &str) -> Result<Dice, ParseError> {
+        Dice::from_str(expression)
+    }
+
+    /// Create a `Dice` from a constant `value`
     pub fn from_constant(value: u32) -> Dice {
         Dice::Constant(value)
     }
 
+    /// Create a `Dice` from a die with the given number of `sides`
     pub fn with_sides(sides: u32) -> Dice {
         Dice::Die(sides)
     }
 
+    /// Creates a new set of `Dice` by repeating this set of dice a given number of `times`
     pub fn repeat(self, times: u32) -> Dice {
         Dice::Repeat(times, Box::new(self), None)
     }
 
+    /// Creates a new set of `Dice` by repeating this set of dice a given number of `times` with the
+    /// given `modifier`
+    pub fn repeat_with_modifier(self, times: u32, modifier: Modifier) -> Dice {
+        Dice::Repeat(times, Box::new(self), Some(modifier))
+    }
+
+    /// Performs a dice roll from this set of `Dice` using the default random number generator
     pub fn roll(&self) -> Roll {
+        self.roll_with_rng(&mut thread_rng())
+    }
+
+    /// Performs a dice roll from this set of `Dice` using the given random number generator
+    pub fn roll_with_rng<R: Rng>(&self, rng: &mut R) -> Roll {
         match *self {
             Dice::Constant(n) => Roll::Constant(n),
-            Dice::Die(n) => Roll::Die(thread_rng().gen_range(1, (n as i64)+1)),
+            Dice::Die(n) => Roll::Die(rng.gen_range(1, (n as i64)+1)),
             Dice::Repeat(n, ref dice, modifier) => {
                 let rolls = (0..n).into_iter().map(|_| dice.roll());
 
@@ -103,19 +192,6 @@ impl Dice {
             },
             Dice::Sum(ref a, ref b) => Roll::Sum(Box::new(a.roll()), Box::new(b.roll())),
             Dice::Difference(ref a, ref b) => Roll::Difference(Box::new(a.roll()), Box::new(b.roll())),
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum ParseError {
-    InvalidInput,
-}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match *self {
-            ParseError::InvalidInput => write!(f, "could not parse dice roll"),
         }
     }
 }
@@ -218,7 +294,16 @@ impl Display for Modifier {
     }
 }
 
+impl Display for ParseError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            ParseError::InvalidInput => write!(f, "could not parse dice roll"),
+        }
+    }
+}
+
 impl Roll {
+    /// Compute the integer value of the roll
     pub fn value(&self) -> i64 {
         match *self {
             Roll::Constant(n) => n as i64,
@@ -257,6 +342,7 @@ impl Display for Roll {
 }
 
 impl ModifiedRoll {
+    /// Compute the modified integer value of the roll
     fn value(&self) -> i64 {
         match self.status {
             RollStatus::Kept => self.roll.value(),
@@ -287,9 +373,11 @@ mod parser {
     use super::*;
     use chomp::prelude::*;
 
+    /// The character based input that will be used
     trait CharInput: Input<Token=char> {}
     impl<T: Input<Token=char>> CharInput for T {}
 
+    /// A combinator to produce an `Option`
     fn opt<I: Input, U, F>(input: I, mut parser: F) -> SimpleResult<I, Option<U>>
     where F: FnMut(I) -> SimpleResult<I, U>
     {
@@ -303,12 +391,14 @@ mod parser {
         }
     }
 
+    /// Zero or more spaces
     fn spaces<I: CharInput>(input: I) -> SimpleResult<I, I::Buffer> {
         parse!{ input;
             take_while(|ch| ch == ' ');
         }
     }
 
+    /// An unsigned integer
     fn number<I: CharInput>(input: I) -> SimpleResult<I, u32> {
         parse! { input;
             let chars = take_while1(|c| c >= '0' && c <= '9');
@@ -316,6 +406,7 @@ mod parser {
         }
     }
 
+    /// A constant `Dice`
     fn constant<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             let n = number();
@@ -323,6 +414,7 @@ mod parser {
         }
     }
 
+    /// A single die
     fn die<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             token('d');
@@ -331,6 +423,7 @@ mod parser {
         }
     }
 
+    /// A set of `Dice` wrapped in parenthesis
     fn term<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             token('(');
@@ -342,6 +435,7 @@ mod parser {
         }
     }
 
+    /// A `Modifier` suffix
     fn modifier<I: CharInput>(input: I, repeat_count: u32) -> SimpleResult<I, Modifier> {
         let keep_high = |i: I| {
             parse!{ i;
@@ -362,6 +456,7 @@ mod parser {
         }
     }
 
+    /// A repeated set of `Dice` with an optional `Modifier`
     fn repeat<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             let n = number();
@@ -371,6 +466,7 @@ mod parser {
         }
     }
 
+    /// A sum of two sets of `Dice`
     fn sum<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             let a = repeat() <|> term() <|> die() <|> constant();
@@ -382,6 +478,7 @@ mod parser {
         }
     }
 
+    /// A difference of two sets of `Dice`
     fn diff<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             let a = repeat() <|> term() <|> die() <|> constant();
@@ -393,6 +490,7 @@ mod parser {
         }
     }
 
+    /// A set of `Dice`
     fn dice<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             let d = sum() <|> diff() <|> repeat() <|> term() <|> die() <|> constant();
@@ -400,6 +498,7 @@ mod parser {
         }
     }
 
+    /// A set of `Dice` surrounded with whitespace ending with EOF
     fn untrimmed_dice<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             spaces();
@@ -410,6 +509,8 @@ mod parser {
         }
     }
 
+    /// Parse a given dice expression into a set of `Dice`. Returns `None` if the expression is
+    /// invalid.
     pub fn parse_dice(text: &str) -> Option<Dice> {
         parse_only_str(untrimmed_dice, text).ok()
     }
@@ -432,13 +533,13 @@ mod tests {
 
     #[test]
     fn test_from_string() {
-        assert_eq!(Dice::from_str("d20"), Ok(D20));
-        assert_eq!(Dice::from_str("3d6"), Ok(3 * D6));
-        assert_eq!(Dice::from_str("   (( 3d6  )    ) "), Ok(3 * D6));
-        assert_eq!(Dice::from_str("d12 + 4"), Ok(D12 + 4));
-        assert_eq!(Dice::from_str("2d8 + 5"), Ok(2*D8 + 5));
-        assert_eq!(Dice::from_str("(2d8 + 5) - 3"), Ok(2*D8 + 5 - 3));
-        assert_eq!(Dice::from_str("3(2d8 + 5)"), Ok(3*(2*D8 + 5)));
-        assert_eq!(Dice::from_str("2d20d6"), Err(()));
+        assert_eq!(Dice::parse("d20"), Ok(D20));
+        assert_eq!(Dice::parse("3d6"), Ok(3 * D6));
+        assert_eq!(Dice::parse("   (( 3d6  )    ) "), Ok(3 * D6));
+        assert_eq!(Dice::parse("d12 + 4"), Ok(D12 + 4));
+        assert_eq!(Dice::parse("2d8 + 5"), Ok(2*D8 + 5));
+        assert_eq!(Dice::parse("(2d8 + 5) - 3"), Ok(2*D8 + 5 - 3));
+        assert_eq!(Dice::parse("3(2d8 + 5)"), Ok(3*(2*D8 + 5)));
+        assert_eq!(Dice::parse("2d20d6"), Err(ParseError::InvalidInput));
     }
 }
