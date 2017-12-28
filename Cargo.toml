@@ -1,0 +1,14 @@
+[package]
+name = "roll"
+version = "0.1.0"
+authors = ["dylanhart <dylan96hart@gmail.com>"]
+
+[lib]
+name = "dice"
+path = "src/dice.rs"
+
+[dependencies]
+rand = "0.3"
+chomp = "0.3"
+structopt = "0.1"
+structopt-derive = "0.1"
