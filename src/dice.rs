@@ -30,6 +30,27 @@ pub enum Modifier {
     KeepLowest(u32),
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Roll {
+    Constant(u32),
+    Die(i64),
+    Repeat(Vec<ModifiedRoll>),
+    Sum(Box<Roll>, Box<Roll>),
+    Difference(Box<Roll>, Box<Roll>),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ModifiedRoll {
+    status: RollStatus,
+    roll: Roll,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum RollStatus {
+    Kept,
+    Dropped,
+}
+
 impl Dice {
     pub fn from_constant(value: u32) -> Dice {
         Dice::Constant(value)
@@ -43,30 +64,45 @@ impl Dice {
         Dice::Repeat(times, Box::new(self), None)
     }
 
-    pub fn roll(&self) -> i32 {
+    pub fn roll(&self) -> Roll {
         match *self {
-            Dice::Constant(n) => n as i32,
-            Dice::Die(n) => thread_rng().gen_range(1, (n as i32)+1),
+            Dice::Constant(n) => Roll::Constant(n),
+            Dice::Die(n) => Roll::Die(thread_rng().gen_range(1, (n as i64)+1)),
             Dice::Repeat(n, ref dice, modifier) => {
                 let rolls = (0..n).into_iter().map(|_| dice.roll());
 
-                if let Some(modifier) = modifier {
-                    match modifier {
-                        Modifier::KeepHighest(count) => {
-                            let ordered = rolls.sorted();
-                            ordered.iter().rev().take(count as usize).sum()
-                        },
-                        Modifier::KeepLowest(count) => {
-                            let ordered = rolls.sorted();
-                            ordered.iter().take(count as usize).sum()
-                        },
-                    }
-                } else {
-                    rolls.sum()
-                }
+                let modded_rolls = match modifier {
+                    Some(Modifier::KeepHighest(count)) => {
+                        let ordered = rolls.sorted_by(|a, b| Ord::cmp(&a.value(), &b.value()));
+                        ordered.into_iter().enumerate()
+                            .map(|(i, r)| {
+                                let count = count as usize;
+                                ModifiedRoll {
+                                    status: if i < count { RollStatus::Kept } else { RollStatus::Dropped },
+                                    roll: r
+                                }
+                            })
+                            .collect()
+                    },
+                    Some(Modifier::KeepLowest(count)) => {
+                        let ordered = rolls.sorted_by(|a, b| Ord::cmp(&b.value(), &a.value()));
+                        ordered.into_iter().enumerate()
+                            .map(|(i, r)| {
+                                let count = count as usize;
+                                ModifiedRoll {
+                                    status: if i < count { RollStatus::Kept } else { RollStatus::Dropped },
+                                    roll: r
+                                }
+                            })
+                            .collect()
+                    },
+                    None => rolls.map(|r| ModifiedRoll { status: RollStatus::Kept, roll: r }).collect()
+                };
+
+                Roll::Repeat(modded_rolls)
             },
-            Dice::Sum(ref a, ref b) => a.roll() + b.roll(),
-            Dice::Difference(ref a, ref b) => a.roll() - b.roll(),
+            Dice::Sum(ref a, ref b) => Roll::Sum(Box::new(a.roll()), Box::new(b.roll())),
+            Dice::Difference(ref a, ref b) => Roll::Difference(Box::new(a.roll()), Box::new(b.roll())),
         }
     }
 }
@@ -178,6 +214,71 @@ impl Display for Modifier {
         match *self {
             Modifier::KeepHighest(n) => write!(f, "h{}", n),
             Modifier::KeepLowest(n) => write!(f, "l{}", n),
+        }
+    }
+}
+
+impl Roll {
+    pub fn value(&self) -> i64 {
+        match *self {
+            Roll::Constant(n) => n as i64,
+            Roll::Die(val) => val,
+            Roll::Repeat(ref rolls) => rolls.iter().map(ModifiedRoll::value).sum(),
+            Roll::Sum(ref a, ref b) => a.value() + b.value(),
+            Roll::Difference(ref a, ref b) => a.value() - b.value(),
+        }
+    }
+}
+
+impl Display for Roll {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            Roll::Constant(n) => write!(f, "{}", n),
+            Roll::Die(val) => write!(f, "{}", val),
+            Roll::Repeat(ref rolls) => {
+                let mut res = write!(f, "[");
+
+                let mut iter = rolls.iter();
+
+                if let Some(roll) = iter.next() {
+                    res = res.and_then(|_| write!(f, "{}", roll));
+                }
+
+                for roll in iter {
+                    res = res.and_then(|_| write!(f, " + {}", roll));
+                }
+
+                res.and_then(|_| write!(f, "]"))
+            },
+            Roll::Sum(ref a, ref b) => write!(f, "{} + {}", a, b),
+            Roll::Difference(ref a, ref b) => write!(f, "{} - {}", a, b),
+        }
+    }
+}
+
+impl ModifiedRoll {
+    fn value(&self) -> i64 {
+        match self.status {
+            RollStatus::Kept => self.roll.value(),
+            RollStatus::Dropped => 0,
+        }
+    }
+}
+
+impl Display for ModifiedRoll {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let extra = match self.status {
+            RollStatus::Kept => "",
+            RollStatus::Dropped => "<dropped>",
+        };
+
+        match self.roll {
+            Roll::Sum(..) | Roll::Difference(..) => {
+                write!(f, "({}){}", self.roll, extra)
+            },
+            _ => {
+                write!(f, "{}{}", self.roll, extra)
+            },
         }
     }
 }

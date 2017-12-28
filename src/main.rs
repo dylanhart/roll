@@ -9,13 +9,14 @@ use structopt::{StructOpt};
 #[structopt(name = "roll", about = "compute dice rolls")]
 struct Options {
     #[structopt(help = "dice values to roll")]
-    rolls: Vec<Dice>,
+    dice: Vec<Dice>,
 }
 
 fn main() {
     let opts = Options::from_args();
 
-    for roll in opts.rolls.iter() {
-        println!("{} = {}", roll, roll.roll());
+    for dice in opts.dice.iter() {
+        let roll = dice.roll();
+        println!("{} = {} = {}", dice, roll, roll.value());
     }
 }
