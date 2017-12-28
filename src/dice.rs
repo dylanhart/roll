@@ -1,6 +1,8 @@
 #[macro_use] extern crate chomp;
+extern crate itertools;
 extern crate rand;
 
+use itertools::{Itertools};
 use rand::{thread_rng, Rng};
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Deref, Sub, Mul};
@@ -17,10 +19,15 @@ pub const D20: Dice = Dice::Die(20);
 pub enum Dice {
     Constant(u32),
     Die(u32),
-    // todo: modifier
-    Repeat(u32, Box<Dice>),
+    Repeat(u32, Box<Dice>, Option<Modifier>),
     Sum(Box<Dice>, Box<Dice>),
     Difference(Box<Dice>, Box<Dice>),
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum Modifier {
+    KeepHighest(u32),
+    KeepLowest(u32),
 }
 
 impl Dice {
@@ -33,19 +40,30 @@ impl Dice {
     }
 
     pub fn repeat(self, times: u32) -> Dice {
-        Dice::Repeat(times, Box::new(self))
+        Dice::Repeat(times, Box::new(self), None)
     }
 
     pub fn roll(&self) -> i32 {
         match *self {
             Dice::Constant(n) => n as i32,
             Dice::Die(n) => thread_rng().gen_range(1, (n as i32)+1),
-            Dice::Repeat(n, ref dice) => {
-                let mut sum = 0;
-                for _ in 0..n {
-                    sum += dice.roll();
+            Dice::Repeat(n, ref dice, modifier) => {
+                let rolls = (0..n).into_iter().map(|_| dice.roll());
+
+                if let Some(modifier) = modifier {
+                    match modifier {
+                        Modifier::KeepHighest(count) => {
+                            let ordered = rolls.sorted();
+                            ordered.iter().rev().take(count as usize).sum()
+                        },
+                        Modifier::KeepLowest(count) => {
+                            let ordered = rolls.sorted();
+                            ordered.iter().take(count as usize).sum()
+                        },
+                    }
+                } else {
+                    rolls.sum()
                 }
-                sum
             },
             Dice::Sum(ref a, ref b) => a.roll() + b.roll(),
             Dice::Difference(ref a, ref b) => a.roll() - b.roll(),
@@ -79,11 +97,18 @@ impl Display for Dice {
         match *self {
             Dice::Constant(n) => write!(f, "{}", n),
             Dice::Die(n) => write!(f, "d{}", n),
-            Dice::Repeat(n, ref dice) => {
+            Dice::Repeat(n, ref dice, None) => {
                 if let &Dice::Die(sides) = dice.deref() {
                     write!(f, "{}d{}", n, sides)
                 } else {
                     write!(f, "{}({})", n, dice)
+                }
+            },
+            Dice::Repeat(n, ref dice, Some(modifier)) => {
+                if let &Dice::Die(sides) = dice.deref() {
+                    write!(f, "{}d{}{}", n, sides, modifier)
+                } else {
+                    write!(f, "{}({}){}", n, dice, modifier)
                 }
             },
             Dice::Sum(ref a, ref b) => write!(f, "{} + {}", a, b),
@@ -148,12 +173,34 @@ impl Sub<Dice> for u32 {
     }
 }
 
+impl Display for Modifier {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            Modifier::KeepHighest(n) => write!(f, "h{}", n),
+            Modifier::KeepLowest(n) => write!(f, "l{}", n),
+        }
+    }
+}
+
 mod parser {
     use super::*;
     use chomp::prelude::*;
 
     trait CharInput: Input<Token=char> {}
     impl<T: Input<Token=char>> CharInput for T {}
+
+    fn opt<I: Input, U, F>(input: I, mut parser: F) -> SimpleResult<I, Option<U>>
+    where F: FnMut(I) -> SimpleResult<I, U>
+    {
+        use chomp::primitives::{Primitives, IntoInner};
+
+        let start = input.mark();
+
+        match parser(input).into_inner() {
+            (i, Ok(value)) => i.ret(Some(value)),
+            (i, Err(_)) => i.restore(start).ret(None),
+        }
+    }
 
     fn spaces<I: CharInput>(input: I) -> SimpleResult<I, I::Buffer> {
         parse!{ input;
@@ -194,11 +241,32 @@ mod parser {
         }
     }
 
+    fn modifier<I: CharInput>(input: I, repeat_count: u32) -> SimpleResult<I, Modifier> {
+        let keep_high = |i: I| {
+            parse!{ i;
+                token('h');
+                let n = opt(number);
+                ret Modifier::KeepHighest(n.unwrap_or(repeat_count-1));
+            }
+        };
+        let keep_low = |i: I| {
+            parse!{ i;
+                token('l');
+                let n = opt(number);
+                ret Modifier::KeepLowest(n.unwrap_or(repeat_count-1));
+            }
+        };
+        parse!{ input;
+            keep_high() <|> keep_low()
+        }
+    }
+
     fn repeat<I: CharInput>(input: I) -> SimpleResult<I, Dice> {
         parse!{ input;
             let n = number();
             let d = or(die, term);
-            ret n * d;
+            let m = opt(|i| modifier(i, n));
+            ret Dice::Repeat(n, Box::new(d), m);
         }
     }
 

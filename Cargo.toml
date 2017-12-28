@@ -10,5 +10,6 @@ path = "src/dice.rs"
 [dependencies]
 rand = "0.3"
 chomp = "0.3"
+itertools = "0.7"
 structopt = "0.1"
 structopt-derive = "0.1"
