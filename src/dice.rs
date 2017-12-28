@@ -73,7 +73,7 @@ impl Dice {
 
                 let modded_rolls = match modifier {
                     Some(Modifier::KeepHighest(count)) => {
-                        let ordered = rolls.sorted_by(|a, b| Ord::cmp(&a.value(), &b.value()));
+                        let ordered = rolls.sorted_by(|a, b| Ord::cmp(&b.value(), &a.value()));
                         ordered.into_iter().enumerate()
                             .map(|(i, r)| {
                                 let count = count as usize;
@@ -85,7 +85,7 @@ impl Dice {
                             .collect()
                     },
                     Some(Modifier::KeepLowest(count)) => {
-                        let ordered = rolls.sorted_by(|a, b| Ord::cmp(&b.value(), &a.value()));
+                        let ordered = rolls.sorted_by(|a, b| Ord::cmp(&a.value(), &b.value()));
                         ordered.into_iter().enumerate()
                             .map(|(i, r)| {
                                 let count = count as usize;
