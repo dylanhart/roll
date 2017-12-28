@@ -8,6 +8,8 @@ use structopt::{StructOpt};
 #[derive(StructOpt, Debug)]
 #[structopt(name = "roll", about = "compute dice rolls")]
 struct Options {
+    #[structopt(short = "r", long = "raw", help = "display results in raw format")]
+    raw: bool,
     #[structopt(short = "c", long = "count", help = "number of times to roll", default_value = "1")]
     count: u32,
     #[structopt(help = "the dice roll")]
@@ -18,6 +20,10 @@ fn main() {
     let opts = Options::from_args();
     for _ in 0 .. opts.count {
         let roll = opts.dice.roll();
-        println!("{} = {} = {}", opts.dice, roll, roll.value());
+        if !opts.raw {
+            println!("{} = {} = {}", opts.dice, roll, roll.value());
+        } else {
+            println!("{}", roll.value());
+        }
     }
 }
